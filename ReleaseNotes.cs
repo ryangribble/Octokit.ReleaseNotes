@@ -20,35 +20,85 @@ namespace OctokitReleaseNotes
         {
             var sb = new StringBuilder();
 
+            // Get merged PR's between specified refs
             var mergedPulls = await GetMergedPullRequestsBetween2Refs(owner, repo, from, to);
+
+            // Remove "skip-release-notes" PR's
+            mergedPulls = mergedPulls
+                .Where(x => !x.Value.Labels.Contains("skip-release-notes"))
+                .ToDictionary(x => x.Key, x => x.Value);
+            
+            // Group+Order by MileStone
             var groupByMilestone = mergedPulls.Values
-                .Where(x => x.Issue.Labels.All(y => y.Name != "skip-release-notes"))
                 .GroupBy(x => x.PullRequest.Milestone == null ? "zzzNone" : x.PullRequest.Milestone.Title)
                 .OrderBy(x => x.Key.ToUpper());
 
             foreach (var milestoneGroup in groupByMilestone)
             {
-                var pulls = milestoneGroup.OrderBy(x => x.PullRequest.MergedAt.Value).Reverse();
-                sb.AppendFormat("\r\n\r\n###Milestone: {0}\r\n", milestoneGroup.Key.Replace("zzzNone", "None"));
-                foreach (var pull in pulls)
+                if (groupByMilestone.Count() > 1)
                 {
-                    var commiters = new[] { pull.PullRequest.User }
-                        .Select(x => FormatContributor(x))
-                        .Concat(
-                            pull.Contributors
-                                .Select(x => FormatContributor(x))
-                                .OrderBy(x => x))
-                        .Distinct();
-
-                    sb.AppendFormat("\r\n- {0} - [#{1}]({2}) via {3}",
-                        pull.PullRequest.Title,
-                        pull.PullRequest.Number,
-                        pull.PullRequest.HtmlUrl,
-                        string.Join(", ", commiters));
+                    // Milestone Header
+                    sb.AppendFormat("### Milestone: {0}\r\n\r\n", milestoneGroup.Key.Replace("zzzNone", "None"));
                 }
+
+                // Group+Order by Label Category
+                foreach (var categoryGroup in milestoneGroup.GroupBy(x => x.Category).OrderBy(x => x.Key))
+                {
+                    // Category Header
+                    sb.AppendFormat("**{0}**\r\n\r\n", FormatLabelCategory(categoryGroup.Key));
+
+                    // Order by PullRequest Number
+                    var pulls = categoryGroup.OrderBy(x => x.PullRequest.MergedAt.Value);
+                    //var pulls = categoryGroup.OrderBy(x => x.PullRequest.Number);
+
+                    foreach (var pull in pulls)
+                    {
+                        var contributors = new[] { pull.PullRequest.User }
+                            .Select(x => FormatContributor(x))
+                            .Concat(
+                                pull.Contributors
+                                    .Select(x => FormatContributor(x))
+                                    .OrderBy(x => x))
+                            .Distinct();
+
+                        sb.AppendFormat("- {0} - [#{1}]({2}) via {3}\r\n",
+                            FormatPulllRequestDescription(pull),
+                            pull.PullRequest.Number,
+                            pull.PullRequest.HtmlUrl,
+                            string.Join(", ", contributors));
+                    }
+
+                    sb.AppendLine();
+                }
+
+                sb.AppendLine();
             }
 
             return sb.ToString();
+        }
+
+        private string FormatPulllRequestDescription(CachedPullRequest pull)
+        {
+            var releaseNotesComment = pull.Comments.LastOrDefault(x => x.Body.ToLower().StartsWith("release_notes:"));
+            return releaseNotesComment == null ? pull.PullRequest.Title.Trim() : releaseNotesComment.Body.Substring("release_notes:".Length + 1).Trim();
+        }
+
+        public string FormatLabelCategory(LabelCategory category)
+        {
+            switch (category)
+            {
+                case LabelCategory.Feature:
+                    return "Features/Enhancements";
+                case LabelCategory.BugFix:
+                    return "Fixes";
+                case LabelCategory.Housekeeping:
+                    return "Housekeeping";
+                case LabelCategory.DocumentationUpdate:
+                    return "Documentation Updates";
+                case LabelCategory.Unknown:
+                default:
+                    return "Other";
+            }
         }
 
         private object FormatContributor(object contributor)
@@ -94,7 +144,43 @@ namespace OctokitReleaseNotes
             // The comments on the PR
             public IEnumerable<IssueComment> Comments { get; set; }
 
+            // The contributors on the PR
             public IEnumerable<Author> Contributors { get; set; }
+
+            // The labels on the PR
+            public IEnumerable<string> Labels { get; set; }
+
+            // The category of the PR
+            public LabelCategory Category { get { return IsFeature() ? LabelCategory.Feature : IsBugFix() ? LabelCategory.BugFix : IsHousekeeping() ? LabelCategory.Housekeeping : IsDoc() ? LabelCategory.DocumentationUpdate : LabelCategory.Unknown; } }
+
+            public bool IsFeature()
+            {
+                return Labels.Any(x => x.ToLower() == "category: feature");
+            }
+
+            public bool IsBugFix()
+            {
+                return Labels.Any(x => x.ToLower() == "category: bug");
+            }
+
+            public bool IsHousekeeping()
+            {
+                return Labels.Any(x => x.ToLower() == "category: housekeeping");
+            }
+
+            public bool IsDoc()
+            {
+                return Labels.Any(x => x.ToLower() == "category: docs-and-samples");
+            }
+        }
+
+        public enum LabelCategory
+        {
+            Feature = 0,
+            BugFix = 1,
+            Housekeeping = 2,
+            DocumentationUpdate = 3,
+            Unknown = 4
         }
 
         private async Task<Dictionary<int, CachedPullRequest>> GetMergedPullRequestsBetween2Refs(string owner, string repository, string fromRef, string toRef)
@@ -158,7 +244,8 @@ namespace OctokitReleaseNotes
                         Commits = pullRequestCommitsTask.Result.ToList(),
                         Comments = pullRequestCommentsTask.Result.ToList(),
                         MergeCommitSha = mergeEvents.FirstOrDefault(x => x.Key == pull.Number).Value.CommitId,
-                        Contributors = contributorUsers.ToList()
+                        Contributors = contributorUsers.ToList(),
+                        Labels = issueTask.Result.Labels.Select(x => x.Name)
                     };
 
                     return cachedPullRequest;
