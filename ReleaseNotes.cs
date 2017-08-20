@@ -16,12 +16,12 @@ namespace OctokitReleaseNotes
             this.GitHubClient = client;
         }
 
-        public async Task<string> GetReleaseNotes(string owner, string repo, string from, string to)
+        public async Task<string> GetReleaseNotes(string owner, string repo, string from, string to, int batchSize)
         {
             var sb = new StringBuilder();
 
             // Get merged PR's between specified refs
-            var mergedPulls = await GetMergedPullRequestsBetween2Refs(owner, repo, from, to);
+            var mergedPulls = await GetMergedPullRequestsBetween2Refs(owner, repo, from, to, batchSize);
 
             // Remove "skip-release-notes" PR's
             mergedPulls = mergedPulls
@@ -35,9 +35,9 @@ namespace OctokitReleaseNotes
 
             foreach (var milestoneGroup in groupByMilestone)
             {
+                // Milestone Header
                 if (groupByMilestone.Count() > 1)
                 {
-                    // Milestone Header
                     sb.AppendFormat("### Milestone: {0}\r\n\r\n", milestoneGroup.Key.Replace("zzzNone", "None"));
                 }
 
@@ -47,9 +47,8 @@ namespace OctokitReleaseNotes
                     // Category Header
                     sb.AppendFormat("**{0}**\r\n\r\n", FormatLabelCategory(categoryGroup.Key));
 
-                    // Order by PullRequest Number
+                    // Order by PullRequest Merge date
                     var pulls = categoryGroup.OrderBy(x => x.PullRequest.MergedAt.Value);
-                    //var pulls = categoryGroup.OrderBy(x => x.PullRequest.Number);
 
                     foreach (var pull in pulls)
                     {
@@ -79,6 +78,7 @@ namespace OctokitReleaseNotes
 
         private string FormatPulllRequestDescription(CachedPullRequest pull)
         {
+            // Use "release_notes" comment if exists, otherwise PR title
             var releaseNotesComment = pull.Comments.LastOrDefault(x => x.Body.ToLower().StartsWith("release_notes:"));
             return releaseNotesComment == null ? pull.PullRequest.Title.Trim() : releaseNotesComment.Body.Substring("release_notes:".Length + 1).Trim();
         }
@@ -104,25 +104,21 @@ namespace OctokitReleaseNotes
         private object FormatContributor(object contributor)
         {
             var login = "";
-            var url = "";
             if (contributor is User)
             {
                 var user = contributor as User;
                 login = user.Login;
-                url = user.HtmlUrl;
             }
             else if (contributor is Author)
             {
                 var author = contributor as Author;
                 login = author.Login;
-                url = author.HtmlUrl;
             }
             else
             {
                 return contributor.ToString();
             }
-
-            //return $"[{login}]({url})";
+            
             return $"@{login}";
         }
 
@@ -132,7 +128,7 @@ namespace OctokitReleaseNotes
             // The pull request itself
             public PullRequest PullRequest { get; set; }
 
-            // THe issue object
+            // The issue object
             public Issue Issue { get; set; }
 
             // The merge commit Sha
@@ -183,17 +179,19 @@ namespace OctokitReleaseNotes
             Unknown = 4
         }
 
-        private async Task<Dictionary<int, CachedPullRequest>> GetMergedPullRequestsBetween2Refs(string owner, string repository, string fromRef, string toRef)
+        private async Task<Dictionary<int, CachedPullRequest>> GetMergedPullRequestsBetween2Refs(string owner, string repository, string fromRef, string toRef, int batchSize)
         {
             IEnumerable<GitHubCommit> commits = null;
 
             // Get commits for the from/to range
+            Console.WriteLine("Get commits in specified range");
             var response = await this.GitHubClient.Repository.Commit.Compare(owner, repository, fromRef, toRef);
             commits = response.Commits;
 
             // First load the Issues (PullRequests) for the date range of our commits
             var from = commits.Min(x => x.Commit.Committer.Date).UtcDateTime;
             var to = commits.Max(x => x.Commit.Committer.Date).UtcDateTime;
+            Console.WriteLine($"Find Pull Requests merged in this date range {from.ToLocalTime()} - {to.ToLocalTime()}");
             var searchRequest = new SearchIssuesRequest
             {
                 Merged = new DateRange(from, to),
@@ -202,8 +200,10 @@ namespace OctokitReleaseNotes
                 PerPage = 1000
             };
             var searchResults = await this.GitHubClient.Search.SearchIssues(searchRequest);
+            Console.WriteLine($"Found {searchResults.Items.Count} Pull Requests merged in this date range");
 
             // Then load the merge events for each PullRequest in parallel
+            Console.WriteLine("Get merge events for each Pull Request");
             var eventsTasks = searchResults.Items.Select(issue =>
             {
                 return Task.Run(async () =>
@@ -215,45 +215,63 @@ namespace OctokitReleaseNotes
             var mergeEvents = await Task.WhenAll(eventsTasks);
 
             // Some of these PRs were in our time range but not for our actual commit range, so  determine which Pull Requests we actually care about (their merge commit is in our commit list)
+            Console.WriteLine("Exclude Pull Requests whose merge commit isn't in our commit range");
             var mergedPullRequests = searchResults.Items.Where(x => mergeEvents.Any(y => x.Number == y.Key && commits.Any(z => z.Sha == y.Value.CommitId)));
 
+            Console.WriteLine($"Found {mergedPullRequests.Count()} merged Pull Requests to load");
+
             // Now load details about the PullRequests using parallel async tasks
-            var tasks = mergedPullRequests.Select(pull =>
+            List<CachedPullRequest> cache = new List<CachedPullRequest>();
+            for (int i = 0; i < mergedPullRequests.Count(); i += batchSize)
             {
-                return Task.Run(async () =>
+                var batchPullRequests = mergedPullRequests
+                    .Skip(i)
+                    .Take(batchSize);
+
+                var tasks = batchPullRequests.Select(pull =>
                 {
-                    var pullRequestTask = this.GitHubClient.PullRequest.Get(owner, repository, pull.Number);
-                    var issueTask = this.GitHubClient.Issue.Get(owner, repository, pull.Number);
-                    var pullRequestCommitsTask = this.GitHubClient.PullRequest.Commits(owner, repository, pull.Number);
-                    var pullRequestCommentsTask = this.GitHubClient.Issue.Comment.GetAllForIssue(owner, repository, pull.Number);
-
-                    await Task.WhenAll(pullRequestTask, issueTask, pullRequestCommitsTask, pullRequestCommentsTask);
-
-                    var pullRequestFullCommitsTask = pullRequestCommitsTask.Result.Select(x => this.GitHubClient.Repository.Commit.Get(owner, repository, x.Sha));
-
-                    var pullRequestFullCommits = await Task.WhenAll(pullRequestFullCommitsTask);
-                    var contributorUsers = pullRequestFullCommits
-                        .Where(x => x.Author != null)
-                        .Select(x => x.Author).DistinctBy(x => x.Login);
-
-
-                    var cachedPullRequest = new CachedPullRequest()
+                    return Task.Run(async () =>
                     {
-                        PullRequest = pullRequestTask.Result,
-                        Issue = issueTask.Result,
-                        Commits = pullRequestCommitsTask.Result.ToList(),
-                        Comments = pullRequestCommentsTask.Result.ToList(),
-                        MergeCommitSha = mergeEvents.FirstOrDefault(x => x.Key == pull.Number).Value.CommitId,
-                        Contributors = contributorUsers.ToList(),
-                        Labels = issueTask.Result.Labels.Select(x => x.Name)
-                    };
+                        // Load the PR, Issue, Commits and Comments
+                        var pullRequestTask = this.GitHubClient.PullRequest.Get(owner, repository, pull.Number);
+                        var issueTask = this.GitHubClient.Issue.Get(owner, repository, pull.Number);
+                        var pullRequestCommitsTask = this.GitHubClient.PullRequest.Commits(owner, repository, pull.Number);
+                        var pullRequestCommentsTask = this.GitHubClient.Issue.Comment.GetAllForIssue(owner, repository, pull.Number);
 
-                    return cachedPullRequest;
+                        await Task.WhenAll(pullRequestTask, issueTask, pullRequestCommitsTask, pullRequestCommentsTask);
+
+                        // Need to load commits individually to get the author details
+                        var pullRequestFullCommitsTask = pullRequestCommitsTask.Result.Select(x => this.GitHubClient.Repository.Commit.Get(owner, repository, x.Sha));
+
+                        var pullRequestFullCommits = await Task.WhenAll(pullRequestFullCommitsTask);
+
+                        // Extract the distinct users who have commits in the PR
+                        var contributorUsers = pullRequestFullCommits
+                            .Where(x => x.Author != null)
+                            .Select(x => x.Author)
+                            .DistinctBy(x => x.Login);
+
+                        // Gather everything into a CachedPullRequest object
+                        var cachedPullRequest = new CachedPullRequest()
+                        {
+                            PullRequest = pullRequestTask.Result,
+                            Issue = issueTask.Result,
+                            Commits = pullRequestCommitsTask.Result.ToList(),
+                            Comments = pullRequestCommentsTask.Result.ToList(),
+                            MergeCommitSha = mergeEvents.FirstOrDefault(x => x.Key == pull.Number).Value.CommitId,
+                            Contributors = contributorUsers.ToList(),
+                            Labels = issueTask.Result.Labels.Select(x => x.Name)
+                        };
+
+                        return cachedPullRequest;
+                    });
                 });
-            });
 
-            // Collect the results
-            var cache = await Task.WhenAll(tasks);
+                // Collect the results
+                cache.AddRange(await Task.WhenAll(tasks));
+
+                Console.WriteLine($"Loaded {cache.Count} Pull Requests");
+            }
 
             return cache.ToDictionary(x => x.PullRequest.Number);
         }
