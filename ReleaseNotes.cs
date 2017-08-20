@@ -184,7 +184,7 @@ namespace OctokitReleaseNotes
             IEnumerable<GitHubCommit> commits = null;
 
             // Get commits for the from/to range
-            Console.WriteLine("Get commits in specified range");
+            Console.WriteLine($"Get commits from {owner}/{repository} in specified range ({fromRef} - {toRef})");
             var response = await this.GitHubClient.Repository.Commit.Compare(owner, repository, fromRef, toRef);
             commits = response.Commits;
 

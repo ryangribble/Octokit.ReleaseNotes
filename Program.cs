@@ -10,7 +10,7 @@ namespace OctokitReleaseNotes
         static int Main(string[] args)
         {
             var app = new CommandLineApplication();
-            app.Name = "octorelease";
+            app.Name = "OctokitReleaseNotes";
             app.HelpOption("-? | -h | --help");
 
             // Display help when no commands specified
@@ -27,14 +27,17 @@ namespace OctokitReleaseNotes
                 command.HelpOption("-? | -h | --help");
 
                 // From and To references
-                var fromRef = command.Argument("from", "FROM reference", false);
-                var toRef = command.Argument("to", "TO reference", false);
+                var fromRef = command.Argument("from", "GitHub reference (commit, branch, tag) of the last release", false);
+                var toRef = command.Argument("to", "GitHub reference (commit, branch, tag) of the current release", false);
+
+                // Repository to use
+                var repository = command.Option("--repo|-r <owner/name>", "The GitHub repository (default octokit/octokit.net)", CommandOptionType.SingleValue);
 
                 // Number of PR's to load at once
-                var concurrency = command.Option("--concurrency <number>", "Number of Pull Requests to load concurrently (default 10)", CommandOptionType.SingleValue);
+                var concurrency = command.Option("--concurrency|-c <number>", "Number of Pull Requests to load concurrently (default 10)", CommandOptionType.SingleValue);
 
                 // Output to file
-                var releaseNotesFile = command.Option("--out <file>", "Output release notes to file", CommandOptionType.SingleValue);
+                var releaseNotesFile = command.Option("--out|-o <file>", "Output release notes to file", CommandOptionType.SingleValue);
 
                 command.OnExecute(() =>
                 {
@@ -51,10 +54,25 @@ namespace OctokitReleaseNotes
                         }
                     }
 
+                    var repoOwner = "octokit";
+                    var repoName = "octokit.net";
+                    if (repository.HasValue())
+                    {
+                        try
+                        {
+                            repoOwner = repository.Value().Split('/')[0];
+                            repoName = repository.Value().Split('/')[1];
+                        }
+                        catch (Exception ex)
+                        {
+                            throw new ArgumentException("Invalid concurrency value specified", ex);
+                        }
+                    }
+
                     var consoleColour = Console.ForegroundColor;
                     try
                     {
-                        GenerateReleaseNotes(fromRef.Value, toRef.Value, batchSize, releaseNotesFile.Value());
+                        GenerateReleaseNotes(repoOwner, repoName, fromRef.Value, toRef.Value, batchSize, releaseNotesFile.Value());
                         return 0;
                     }
                     catch (Exception ex)
@@ -99,33 +117,44 @@ namespace OctokitReleaseNotes
             Credentials githubCreds = null;
 
             var githubToken = Environment.GetEnvironmentVariable("OCTOKIT_OAUTHTOKEN");
+            var githubUsername = Environment.GetEnvironmentVariable("OCTOKIT_GITHUBUSERNAME");
+            var githubPassword = Environment.GetEnvironmentVariable("OCTOKIT_GITHUBPASSWORD");
+
             if (githubToken != null)
             {
                 Console.WriteLine($"Authenticating using OAUTH token (*******{githubToken.Substring(githubToken.Length - 6)})");
                 githubCreds = new Credentials(githubToken);
             }
-            else
+            else if (githubUsername != null && githubPassword != null)
             {
-                var githubUsername = Environment.GetEnvironmentVariable("OCTOKIT_GITHUBUSERNAME");
-                var githubPassword = Environment.GetEnvironmentVariable("OCTOKIT_GITHUBPASSWORD");
+                
                 Console.WriteLine($"Authenticating using BASIC auth ({githubUsername})");
                 githubCreds = new Credentials(githubUsername, githubPassword);
+            }
+            else
+            {
+                Console.WriteLine($"Authenticating using ANONYMOUS auth (this probably will run into rate limit issues)");
+                githubCreds = null;
             }
 
             return githubCreds;
         }
 
-        static void GenerateReleaseNotes(string fromRef, string toRef, int batchSize, string releaseNotesFile)
+        static void GenerateReleaseNotes(string repoOwner, string repoName, string fromRef, string toRef, int batchSize, string releaseNotesFile)
         {
             Console.WriteLine("Initializing Github connection");
-            var githubClient = new GitHubClient(new ProductHeaderValue("OctokitReleaseNotes"))
+            
+            var githubClient = new GitHubClient(new ProductHeaderValue("OctokitReleaseNotes"));
+
+            var credentials = GetGithubCredentials();
+            if (credentials != null)
             {
-                Credentials = GetGithubCredentials()
-            };
+                githubClient.Credentials = credentials;
+            }
 
             Console.WriteLine($"Generating release notes for PR's between {fromRef} and {toRef}");
             var generator = new ReleaseNotes(githubClient);
-            var releaseNotes = generator.GetReleaseNotes("octokit", "octokit.net", fromRef, toRef, batchSize).Result;
+            var releaseNotes = generator.GetReleaseNotes(repoOwner, repoName, fromRef, toRef, batchSize).Result;
 
             if (!string.IsNullOrEmpty(releaseNotesFile))
             {
