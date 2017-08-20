@@ -3,6 +3,11 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>netcoreapp2.0</TargetFramework>
+    <Authors>ryangribble</Authors>
+    <Description>Release notes generator for octokit.net</Description>
+    <PackageId>Octokit.ReleaseNotes</PackageId>
+    <Company>Octokit.ReleaseNotes</Company>
+    <Product>Octokit.ReleaseNotes</Product>
   </PropertyGroup>
 
   <ItemGroup>

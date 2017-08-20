@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
 VisualStudioVersion = 15.0.26730.3
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "OctokitReleaseNotes", "OctokitReleaseNotes.csproj", "{49E9B3B8-717C-40D4-8F31-FF3D0EA33921}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Octokit.ReleaseNotes", "Octokit.ReleaseNotes.csproj", "{49E9B3B8-717C-40D4-8F31-FF3D0EA33921}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

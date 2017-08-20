@@ -1,9 +1,9 @@
-# OctokitReleaseNotes
+# Octokit.ReleaseNotes
 
 A dotnet core 2.0 commandline app that generates release notes for [octokit/octokit.net](https://github.com/octokit/octokit.net) in our [preferred format](https://github.com/octokit/octokit.net/releases)
 
 ```
-Usage: OctokitReleaseNotes generate [arguments] [options]
+Usage: Octokit.ReleaseNotes generate [arguments] [options]
 
 Arguments:
   from  GitHub reference (commit, branch, tag) of the last release

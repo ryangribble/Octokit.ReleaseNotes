@@ -3,14 +3,14 @@ using System.IO;
 using Octokit;
 using Microsoft.Extensions.CommandLineUtils;
 
-namespace OctokitReleaseNotes
+namespace Octokit.ReleaseNotes
 {
     public class Program
     {
         static int Main(string[] args)
         {
             var app = new CommandLineApplication();
-            app.Name = "OctokitReleaseNotes";
+            app.Name = "Octokit.ReleaseNotes";
             app.HelpOption("-? | -h | --help");
 
             // Display help when no commands specified
@@ -144,7 +144,7 @@ namespace OctokitReleaseNotes
         {
             Console.WriteLine("Initializing Github connection");
             
-            var githubClient = new GitHubClient(new ProductHeaderValue("OctokitReleaseNotes"));
+            var githubClient = new GitHubClient(new ProductHeaderValue("Octokit.ReleaseNotes"));
 
             var credentials = GetGithubCredentials();
             if (credentials != null)
