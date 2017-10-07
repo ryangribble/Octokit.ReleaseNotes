@@ -165,7 +165,7 @@ namespace Octokit.ReleaseNotes
                 }
             }
 
-            Console.WriteLine("\r\n\r\nRelease Notes:\r\n");
+            Console.WriteLine("\r\n\r\n");
             Console.WriteLine(releaseNotes);
         }
     }

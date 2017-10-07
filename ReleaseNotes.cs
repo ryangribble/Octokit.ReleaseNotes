@@ -27,11 +27,33 @@ namespace Octokit.ReleaseNotes
             mergedPulls = mergedPulls
                 .Where(x => !x.Value.Labels.Contains("skip-release-notes"))
                 .ToDictionary(x => x.Key, x => x.Value);
+
+            var contribs = mergedPulls.SelectMany(x => x.Value.Contributors.Select(y => y.Login)).Distinct().ToList();
             
+            sb.Append("## Advisories and Breaking Changes\r\n\r\n");
+            var advisories = 0;
+            foreach (var pull in mergedPulls.Values)
+            {
+                // Some PR's might have multiple "advisories" comments, meaning multiple entries
+                var numberOfEntries = GetNumberAdvisories(pull);
+                for (var idx = 0; idx < numberOfEntries; idx++)
+                {
+                    sb.AppendFormat("- {0}\r\n",
+                        FormatPulllRequestAdvisory(pull, idx));
+                    advisories++;
+                }
+            }
+            if (advisories <= 0)
+            {
+                sb.AppendFormat("- None\r\n");
+            }
+
             // Group+Order by MileStone
             var groupByMilestone = mergedPulls.Values
                 .GroupBy(x => x.PullRequest.Milestone == null ? "zzzNone" : x.PullRequest.Milestone.Title)
                 .OrderBy(x => x.Key.ToUpper());
+
+            sb.Append("\r\n## Release Notes\r\n\r\n");
 
             foreach (var milestoneGroup in groupByMilestone)
             {
@@ -60,11 +82,16 @@ namespace Octokit.ReleaseNotes
                                     .OrderBy(x => x))
                             .Distinct();
 
-                        sb.AppendFormat("- {0} - [#{1}]({2}) via {3}\r\n",
-                            FormatPulllRequestDescription(pull),
-                            pull.PullRequest.Number,
-                            pull.PullRequest.HtmlUrl,
-                            string.Join(", ", contributors));
+                        // Some PR's might have multiple "release_notes" comments, meaning multiple entries
+                        var numberOfEntries = GetNumberReleaseNotes(pull);
+                        for (var idx = 0; idx < numberOfEntries; idx++)
+                        {
+                            sb.AppendFormat("- {0} - [#{1}]({2}) via {3}\r\n",
+                                FormatPulllRequestDescription(pull, idx),
+                                pull.PullRequest.Number,
+                                pull.PullRequest.HtmlUrl,
+                                string.Join(", ", contributors));
+                        }
                     }
 
                     sb.AppendLine();
@@ -76,11 +103,36 @@ namespace Octokit.ReleaseNotes
             return sb.ToString();
         }
 
-        private string FormatPulllRequestDescription(CachedPullRequest pull)
+        private int GetNumberAdvisories(CachedPullRequest pull)
+        {
+            var comments = pull.Comments.Where(x => x.Body.ToLower().StartsWith("advisories:"));
+            return comments.Count();
+        }
+
+        private string FormatPulllRequestAdvisory(CachedPullRequest pull, int index)
+        {
+            var comments = pull.Comments.Where(x => x.Body.ToLower().StartsWith("advisories:"));
+            return comments.ToList()[index].Body.Substring("advisories:".Length + 1).Trim();
+        }
+
+        private int GetNumberReleaseNotes(CachedPullRequest pull)
+        {
+            var comments = pull.Comments.Where(x => x.Body.ToLower().StartsWith("release_notes:"));
+            return Math.Max(1, comments.Count());
+        }
+
+        private string FormatPulllRequestDescription(CachedPullRequest pull, int index)
         {
             // Use "release_notes" comment if exists, otherwise PR title
-            var releaseNotesComment = pull.Comments.LastOrDefault(x => x.Body.ToLower().StartsWith("release_notes:"));
-            return releaseNotesComment == null ? pull.PullRequest.Title.Trim() : releaseNotesComment.Body.Substring("release_notes:".Length + 1).Trim();
+            var comments = pull.Comments.Where(x => x.Body.ToLower().StartsWith("release_notes:"));
+            if (comments.Count() <= 0)
+            {
+                return pull.PullRequest.Title.Trim();
+            }
+            else
+            {
+                return comments.ToList()[index].Body.Substring("release_notes:".Length + 1).Trim();
+            }
         }
 
         public string FormatLabelCategory(LabelCategory category)
@@ -104,22 +156,25 @@ namespace Octokit.ReleaseNotes
         private object FormatContributor(object contributor)
         {
             var login = "";
+            var url = "";
             if (contributor is User)
             {
                 var user = contributor as User;
                 login = user.Login;
+                url = user.HtmlUrl;
             }
             else if (contributor is Author)
             {
                 var author = contributor as Author;
                 login = author.Login;
+                url = author.HtmlUrl;
             }
             else
             {
-                return contributor.ToString();
+                return $"@{contributor}";
             }
-            
-            return $"@{login}";
+
+            return $"[@{login}]({url})";
         }
 
         // A class containing  the info about a pull request we need to generate release notes
