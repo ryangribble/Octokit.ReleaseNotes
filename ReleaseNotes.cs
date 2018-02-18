@@ -302,7 +302,7 @@ namespace Octokit.ReleaseNotes
 
                         // Extract the distinct users who have commits in the PR
                         var contributorUsers = pullRequestFullCommits
-                            .Where(x => x.Author != null)
+                            .Where(x => x.Author != null && x.Author.Id != 0)
                             .Select(x => x.Author)
                             .DistinctBy(x => x.Login);
 
