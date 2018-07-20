@@ -2,7 +2,7 @@
   "profiles": {
     "Octokit.ReleaseNotes": {
       "commandName": "Project",
-      "commandLineArgs": "generate v0.28.0 master"
+      "commandLineArgs": "generate v0.30.0 master"
     }
   }
 }

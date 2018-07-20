@@ -30,6 +30,10 @@ namespace Octokit.ReleaseNotes
 
             var contribs = mergedPulls.SelectMany(x => x.Value.Contributors.Select(y => y.Login)).Distinct().ToList();
             
+            Console.WriteLine();
+            Console.WriteLine($"Release Stats: {mergedPulls.Count} pull requests from {contribs.Count} contributors!");
+            Console.WriteLine();
+
             sb.Append("## Advisories and Breaking Changes\r\n\r\n");
             var advisories = 0;
             foreach (var pull in mergedPulls.Values)
@@ -127,7 +131,7 @@ namespace Octokit.ReleaseNotes
             var comments = pull.Comments.Where(x => x.Body.ToLower().StartsWith("release_notes:"));
             if (comments.Count() <= 0)
             {
-                return pull.PullRequest.Title.Trim();
+                throw new Exception($"PR #{pull.PullRequest.Number} does not have a release_notes entry!");
             }
             else
             {
@@ -202,7 +206,7 @@ namespace Octokit.ReleaseNotes
             public IEnumerable<string> Labels { get; set; }
 
             // The category of the PR
-            public LabelCategory Category { get { return IsFeature() ? LabelCategory.Feature : IsBugFix() ? LabelCategory.BugFix : IsHousekeeping() ? LabelCategory.Housekeeping : IsDoc() ? LabelCategory.DocumentationUpdate : LabelCategory.Unknown; } }
+            public LabelCategory Category { get { return IsFeature() ? LabelCategory.Feature : IsBugFix() ? LabelCategory.BugFix : IsHousekeeping() ? LabelCategory.Housekeeping : IsDoc() ? LabelCategory.DocumentationUpdate : throw new Exception($"PR #{this.PullRequest.Number} has unknown label!")/* LabelCategory.Unknown*/; } }
 
             public bool IsFeature()
             {
